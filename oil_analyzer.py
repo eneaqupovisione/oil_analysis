@@ -363,11 +363,30 @@ class CoreOilAnalyzer:
         
         # Day of Week analysis
         if 'Day_of_Week' in df.columns and len(df) > 0:
+            # Analisi base esistente
             dow_stats = df.groupby('Day_of_Week').agg({
                 'Volume': 'mean',
                 'Change_Pct': lambda x: abs(x).mean(),
                 'Daily_Range': 'mean'
             }).round(4)
+            
+            # Nuove analisi dettagliate per giorno della settimana
+            dow_detailed = {}
+            for day in df['Day_of_Week'].unique():
+                day_data = df[df['Day_of_Week'] == day]
+                positive_data = day_data[day_data['Change_Pct'] > 0]
+                negative_data = day_data[day_data['Change_Pct'] < 0]
+                
+                dow_detailed[day] = {
+                    "avg_change_overall": round(float(day_data['Change_Pct'].mean()), 4),
+                    "avg_change_positive": round(float(positive_data['Change_Pct'].mean()), 4) if len(positive_data) > 0 else 0.0,
+                    "avg_change_negative": round(float(negative_data['Change_Pct'].mean()), 4) if len(negative_data) > 0 else 0.0,
+                    "total_days": len(day_data),
+                    "positive_days": len(positive_data),
+                    "negative_days": len(negative_data),
+                    "positive_percentage": round(len(positive_data) / len(day_data) * 100, 2) if len(day_data) > 0 else 0.0,
+                    "negative_percentage": round(len(negative_data) / len(day_data) * 100, 2) if len(day_data) > 0 else 0.0
+                }
             
             if len(dow_stats) > 0:
                 result["day_of_week"] = {
@@ -394,7 +413,8 @@ class CoreOilAnalyzer:
                     "range_min": {
                         "day": dow_stats['Daily_Range'].idxmin(),
                         "value": round(float(dow_stats['Daily_Range'].min()), 4)
-                    }
+                    },
+                    "detailed_analysis": dow_detailed
                 }
             else:
                 result["day_of_week"] = self._empty_seasonal_section()
@@ -403,11 +423,30 @@ class CoreOilAnalyzer:
         
         # Week of Month analysis
         if 'Week_of_Month' in df.columns and len(df) > 0:
+            # Analisi base esistente
             wom_stats = df.groupby('Week_of_Month').agg({
                 'Volume': 'mean',
                 'Change_Pct': lambda x: abs(x).mean(),
                 'Daily_Range': 'mean'
             }).round(4)
+            
+            # Nuove analisi dettagliate per settimana del mese
+            wom_detailed = {}
+            for week in df['Week_of_Month'].unique():
+                week_data = df[df['Week_of_Month'] == week]
+                positive_data = week_data[week_data['Change_Pct'] > 0]
+                negative_data = week_data[week_data['Change_Pct'] < 0]
+                
+                wom_detailed[int(week)] = {
+                    "avg_change_overall": round(float(week_data['Change_Pct'].mean()), 4),
+                    "avg_change_positive": round(float(positive_data['Change_Pct'].mean()), 4) if len(positive_data) > 0 else 0.0,
+                    "avg_change_negative": round(float(negative_data['Change_Pct'].mean()), 4) if len(negative_data) > 0 else 0.0,
+                    "total_days": len(week_data),
+                    "positive_days": len(positive_data),
+                    "negative_days": len(negative_data),
+                    "positive_percentage": round(len(positive_data) / len(week_data) * 100, 2) if len(week_data) > 0 else 0.0,
+                    "negative_percentage": round(len(negative_data) / len(week_data) * 100, 2) if len(week_data) > 0 else 0.0
+                }
             
             if len(wom_stats) > 0:
                 result["week_of_month"] = {
@@ -434,7 +473,8 @@ class CoreOilAnalyzer:
                     "range_min": {
                         "week": int(wom_stats['Daily_Range'].idxmin()),
                         "value": round(float(wom_stats['Daily_Range'].min()), 4)
-                    }
+                    },
+                    "detailed_analysis": wom_detailed
                 }
             else:
                 result["week_of_month"] = self._empty_seasonal_section_week()
@@ -443,11 +483,30 @@ class CoreOilAnalyzer:
         
         # Month analysis
         if 'Month' in df.columns and len(df) > 0:
+            # Analisi base esistente
             month_stats = df.groupby('Month').agg({
                 'Volume': 'mean',
                 'Change_Pct': lambda x: abs(x).mean(),
                 'Daily_Range': 'mean'
             }).round(4)
+            
+            # Nuove analisi dettagliate per mese
+            month_detailed = {}
+            for month in df['Month'].unique():
+                month_data = df[df['Month'] == month]
+                positive_data = month_data[month_data['Change_Pct'] > 0]
+                negative_data = month_data[month_data['Change_Pct'] < 0]
+                
+                month_detailed[int(month)] = {
+                    "avg_change_overall": round(float(month_data['Change_Pct'].mean()), 4),
+                    "avg_change_positive": round(float(positive_data['Change_Pct'].mean()), 4) if len(positive_data) > 0 else 0.0,
+                    "avg_change_negative": round(float(negative_data['Change_Pct'].mean()), 4) if len(negative_data) > 0 else 0.0,
+                    "total_days": len(month_data),
+                    "positive_days": len(positive_data),
+                    "negative_days": len(negative_data),
+                    "positive_percentage": round(len(positive_data) / len(month_data) * 100, 2) if len(month_data) > 0 else 0.0,
+                    "negative_percentage": round(len(negative_data) / len(month_data) * 100, 2) if len(month_data) > 0 else 0.0
+                }
             
             if len(month_stats) > 0:
                 result["month"] = {
@@ -474,12 +533,50 @@ class CoreOilAnalyzer:
                     "range_min": {
                         "month": int(month_stats['Daily_Range'].idxmin()),
                         "value": round(float(month_stats['Daily_Range'].min()), 4)
-                    }
+                    },
+                    "detailed_analysis": month_detailed
                 }
             else:
                 result["month"] = self._empty_seasonal_section_month()
         else:
             result["month"] = self._empty_seasonal_section_month()
+        
+        # Aggiungi analisi globale per giorni positivi/negativi
+        positive_days_total = len(df[df['Change_Pct'] > 0])
+        negative_days_total = len(df[df['Change_Pct'] < 0])
+        total_days = len(df)
+        
+        result["global_summary"] = {
+            "total_days": total_days,
+            "positive_days_total": positive_days_total,
+            "negative_days_total": negative_days_total,
+            "positive_percentage_total": round(positive_days_total / total_days * 100, 2) if total_days > 0 else 0.0,
+            "negative_percentage_total": round(negative_days_total / total_days * 100, 2) if total_days > 0 else 0.0
+        }
+        
+        # Dettaglio giorni positivi per giorno della settimana
+        if 'Day_of_Week' in df.columns:
+            positive_by_dow = {}
+            negative_by_dow = {}
+            
+            for day in df['Day_of_Week'].unique():
+                day_positive = len(df[(df['Day_of_Week'] == day) & (df['Change_Pct'] > 0)])
+                day_negative = len(df[(df['Day_of_Week'] == day) & (df['Change_Pct'] < 0)])
+                
+                positive_by_dow[day] = {
+                    "count": day_positive,
+                    "percentage_of_total_positive": round(day_positive / positive_days_total * 100, 2) if positive_days_total > 0 else 0.0,
+                    "percentage_of_day_total": round(day_positive / len(df[df['Day_of_Week'] == day]) * 100, 2) if len(df[df['Day_of_Week'] == day]) > 0 else 0.0
+                }
+                
+                negative_by_dow[day] = {
+                    "count": day_negative,
+                    "percentage_of_total_negative": round(day_negative / negative_days_total * 100, 2) if negative_days_total > 0 else 0.0,
+                    "percentage_of_day_total": round(day_negative / len(df[df['Day_of_Week'] == day]) * 100, 2) if len(df[df['Day_of_Week'] == day]) > 0 else 0.0
+                }
+            
+            result["global_summary"]["positive_days_by_weekday"] = positive_by_dow
+            result["global_summary"]["negative_days_by_weekday"] = negative_by_dow
         
         return result
     
@@ -488,7 +585,16 @@ class CoreOilAnalyzer:
         return {
             "day_of_week": self._empty_seasonal_section(),
             "week_of_month": self._empty_seasonal_section_week(),
-            "month": self._empty_seasonal_section_month()
+            "month": self._empty_seasonal_section_month(),
+            "global_summary": {
+                "total_days": 0,
+                "positive_days_total": 0,
+                "negative_days_total": 0,
+                "positive_percentage_total": 0.0,
+                "negative_percentage_total": 0.0,
+                "positive_days_by_weekday": {},
+                "negative_days_by_weekday": {}
+            }
         }
     
     def _empty_seasonal_section(self):
@@ -498,7 +604,8 @@ class CoreOilAnalyzer:
             "change_max": {"day": "N/A", "value": 0.0},
             "change_min": {"day": "N/A", "value": 0.0},
             "range_max": {"day": "N/A", "value": 0.0},
-            "range_min": {"day": "N/A", "value": 0.0}
+            "range_min": {"day": "N/A", "value": 0.0},
+            "detailed_analysis": {}
         }
     
     def _empty_seasonal_section_week(self):
@@ -508,7 +615,8 @@ class CoreOilAnalyzer:
             "change_max": {"week": 0, "value": 0.0},
             "change_min": {"week": 0, "value": 0.0},
             "range_max": {"week": 0, "value": 0.0},
-            "range_min": {"week": 0, "value": 0.0}
+            "range_min": {"week": 0, "value": 0.0},
+            "detailed_analysis": {}
         }
     
     def _empty_seasonal_section_month(self):
@@ -518,7 +626,8 @@ class CoreOilAnalyzer:
             "change_max": {"month": 0, "value": 0.0},
             "change_min": {"month": 0, "value": 0.0},
             "range_max": {"month": 0, "value": 0.0},
-            "range_min": {"month": 0, "value": 0.0}
+            "range_min": {"month": 0, "value": 0.0},
+            "detailed_analysis": {}
         }
     
     def analyze_bollinger_volatility(self, df):
