@@ -117,39 +117,86 @@ class CoreOilAnalyzer:
         negative_streaks = []
         current_streak = 0
         current_type = None
+        current_start_date = None
         
-        for _, row in df.iterrows():
+        # Per tracciare i dettagli dei streak
+        positive_streak_details = []
+        negative_streak_details = []
+        
+        for idx, row in df.iterrows():
             if row['Is_Positive'] == 1:
                 if current_type == 'positive':
                     current_streak += 1
                 else:
+                    # Fine del negative streak (se c'era)
                     if current_type == 'negative' and current_streak > 0:
                         negative_streaks.append(current_streak)
+                        # Usa l'indice precedente per trovare la data di fine
+                        prev_idx = df.index[df.index.get_loc(idx) - 1] if df.index.get_loc(idx) > 0 else idx
+                        end_date = df.loc[prev_idx, 'Date']
+                        negative_streak_details.append({
+                            "days": current_streak,
+                            "start_date": current_start_date.strftime('%Y-%m-%d'),
+                            "end_date": end_date.strftime('%Y-%m-%d')
+                        })
+                    # Inizio del positive streak
                     current_streak = 1
                     current_type = 'positive'
+                    current_start_date = row['Date']
             else:
                 if current_type == 'negative':
                     current_streak += 1
                 else:
+                    # Fine del positive streak (se c'era)
                     if current_type == 'positive' and current_streak > 0:
                         positive_streaks.append(current_streak)
+                        # Usa l'indice precedente per trovare la data di fine
+                        prev_idx = df.index[df.index.get_loc(idx) - 1] if df.index.get_loc(idx) > 0 else idx
+                        end_date = df.loc[prev_idx, 'Date']
+                        positive_streak_details.append({
+                            "days": current_streak,
+                            "start_date": current_start_date.strftime('%Y-%m-%d'),
+                            "end_date": end_date.strftime('%Y-%m-%d')
+                        })
+                    # Inizio del negative streak
                     current_streak = 1
                     current_type = 'negative'
+                    current_start_date = row['Date']
         
-        # Aggiungi l'ultimo streak
+        # Aggiungi l'ultimo streak se il dataset finisce con uno streak
         if current_type == 'positive' and current_streak > 0:
             positive_streaks.append(current_streak)
+            positive_streak_details.append({
+                "days": current_streak,
+                "start_date": current_start_date.strftime('%Y-%m-%d'),
+                "end_date": df.iloc[-1]['Date'].strftime('%Y-%m-%d')
+            })
         elif current_type == 'negative' and current_streak > 0:
             negative_streaks.append(current_streak)
+            negative_streak_details.append({
+                "days": current_streak,
+                "start_date": current_start_date.strftime('%Y-%m-%d'),
+                "end_date": df.iloc[-1]['Date'].strftime('%Y-%m-%d')
+            })
         
         # Top 5 streaks
         positive_streaks.sort(reverse=True)
         negative_streaks.sort(reverse=True)
         
+        # Ordina i dettagli per numero di giorni (decrescente)
+        positive_streak_details.sort(key=lambda x: x["days"], reverse=True)
+        negative_streak_details.sort(key=lambda x: x["days"], reverse=True)
+        
         result["max_positive_streak_top5"] = positive_streaks[:5] if positive_streaks else [0]
         result["max_negative_streak_top5"] = negative_streaks[:5] if negative_streaks else [0]
         result["max_positive_streak"] = max(positive_streaks) if positive_streaks else 0
         result["max_negative_streak"] = max(negative_streaks) if negative_streaks else 0
+        
+        # Aggiungi i dettagli delle date
+        result["max_positive_streak_details"] = positive_streak_details[0] if positive_streak_details else {"days": 0, "start_date": "N/A", "end_date": "N/A"}
+        result["max_negative_streak_details"] = negative_streak_details[0] if negative_streak_details else {"days": 0, "start_date": "N/A", "end_date": "N/A"}
+        result["top5_positive_streaks_details"] = positive_streak_details[:5] if positive_streak_details else []
+        result["top5_negative_streaks_details"] = negative_streak_details[:5] if negative_streak_details else []
         
         # Rally/Decline analysis
         if len(df) > 0:
@@ -190,6 +237,10 @@ class CoreOilAnalyzer:
             "max_negative_streak_top5": [0],
             "max_positive_streak": 0,
             "max_negative_streak": 0,
+            "max_positive_streak_details": {"days": 0, "start_date": "N/A", "end_date": "N/A"},
+            "max_negative_streak_details": {"days": 0, "start_date": "N/A", "end_date": "N/A"},
+            "top5_positive_streaks_details": [],
+            "top5_negative_streaks_details": [],
             "max_rally_pct_top5": [0],
             "max_decline_pct_top5": [0],
             "max_rally_pct": 0.0,
@@ -716,16 +767,92 @@ class CoreOilAnalyzer:
             print(f"   ⚠️  No data for {period_name}")
             return None
         
-        # Esegue tutte le analisi
+        # Calcola le analisi di base
+        basic_perf = self.analyze_basic_performance(df)
+        seasonal_data = self.analyze_seasonal_patterns(df)
+        
+        # Trova il miglior e peggior giorno
+        best_day_row = df.loc[df['Change_Pct'].idxmax()]
+        worst_day_row = df.loc[df['Change_Pct'].idxmin()]
+        
+        # Trova i migliori/peggiori rally/decline (streak consecutivi)
+        best_rally = self._find_best_rally(df)
+        worst_decline = self._find_worst_decline(df)
+        
+        # Calcola date mancanti dettagliate
+        missing_dates_info = self._get_missing_dates_details(df)
+        
+        # Estrai conteggi positivi/negativi per giorno della settimana
+        positive_by_weekday = {}
+        negative_by_weekday = {}
+        
+        if 'Day_of_Week' in df.columns:
+            for day_ita, day_eng in [('Lunedì', 'Monday'), ('Martedì', 'Tuesday'), ('Mercoledì', 'Wednesday'), 
+                                      ('Giovedì', 'Thursday'), ('Venerdì', 'Friday'), ('Sabato', 'Saturday'), ('Domenica', 'Sunday')]:
+                if day_ita in df['Day_of_Week'].values:
+                    pos_count = len(df[(df['Day_of_Week'] == day_ita) & (df['Change_Pct'] > 0)])
+                    neg_count = len(df[(df['Day_of_Week'] == day_ita) & (df['Change_Pct'] < 0)])
+                    positive_by_weekday[day_eng] = pos_count
+                    negative_by_weekday[day_eng] = neg_count
+                else:
+                    positive_by_weekday[day_eng] = 0
+                    negative_by_weekday[day_eng] = 0
+        
+        # Struttura organizzata
         result = {
-            "period": period_name,
-            "data_quality": self.get_data_quality(df),
-            "core_analysis": {
-                "basic_performance": self.analyze_basic_performance(df),
+            "metadata": {
+                "period": period_name,
+                "total_records": len(df),
+                "date_range": {
+                    "start": df['Date'].min().strftime('%Y-%m-%d'),
+                    "end": df['Date'].max().strftime('%Y-%m-%d')
+                },
+                "data_quality_score": round(((len(df) * 6 - df[['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Pct']].isnull().sum().sum()) / (len(df) * 6)) * 100, 2),
+                "completeness": round(((len(df) / (len(df) + missing_dates_info["count"])) * ((len(df) * 6 - df[['Open', 'High', 'Low', 'Close', 'Volume', 'Change_Pct']].isnull().sum().sum()) / (len(df) * 6))) * 100, 2),
+                "missing_dates": missing_dates_info
+            },
+            
+            "summary": {
+                "total_days": len(df),
+                "positive_days": {
+                    "total": basic_perf["days_positive"],
+                    "by_weekday": positive_by_weekday
+                },
+                "negative_days": {
+                    "total": basic_perf["days_negative"],
+                    "by_weekday": negative_by_weekday
+                },
+                "win_rate": round((basic_perf["days_positive"] / len(df)) * 100, 2) if len(df) > 0 else 0.0,
+                "max_positive_streak": basic_perf["max_positive_streak"],
+                "max_negative_streak": basic_perf["max_negative_streak"],
+                "best_day": {
+                    "change": round(float(best_day_row['Change_Pct']), 4),
+                    "date": best_day_row['Date'].strftime('%Y-%m-%d'),
+                    "day_of_the_week": best_day_row.get('Day_of_Week', 'N/A'),
+                    "volume": round(float(best_day_row['Volume']), 2)
+                },
+                "worst_day": {
+                    "change": round(float(worst_day_row['Change_Pct']), 4),
+                    "date": worst_day_row['Date'].strftime('%Y-%m-%d'),
+                    "day_of_the_week": worst_day_row.get('Day_of_Week', 'N/A'),
+                    "volume": round(float(worst_day_row['Volume']), 2)
+                },
+                "best_rally": best_rally,
+                "worst_decline": worst_decline
+            },
+            
+            "detailed_analysis": {
+                "basic_performance": basic_perf,
                 "volume_range_extremes": self.analyze_volume_range_extremes(df),
-                "ma_analysis": self.analyze_ma_analysis(df),
-                "seasonal_patterns": self.analyze_seasonal_patterns(df),
+                "moving_averages": self.analyze_ma_analysis(df),
                 "bollinger_volatility": self.analyze_bollinger_volatility(df)
+            },
+            
+            "temporal_patterns": {
+                "by_weekday": seasonal_data.get("day_of_week", {}),
+                "by_week_of_month": seasonal_data.get("week_of_month", {}),
+                "by_month": seasonal_data.get("month", {}),
+                "global_summary": seasonal_data.get("global_summary", {})
             }
         }
         
@@ -863,6 +990,111 @@ class CoreOilAnalyzer:
         print(f"🎯 Analysis types: Basic Performance, Volume Extremes, MA Analysis, Seasonal Patterns, Bollinger Volatility")
         
         return all_results
+
+    def _find_best_rally(self, df):
+        """Trova il miglior rally (sequenza di giorni positivi consecutivi)"""
+        if len(df) == 0:
+            return {"start_date": "N/A", "total_days": 0, "change": 0.0}
+        
+        best_rally = {"start_date": "N/A", "total_days": 0, "change": 0.0}
+        current_rally_start = None
+        current_rally_days = 0
+        current_rally_change = 0.0
+        
+        for i, row in df.iterrows():
+            if row['Change_Pct'] > 0:
+                if current_rally_start is None:
+                    current_rally_start = row['Date']
+                    current_rally_days = 1
+                    current_rally_change = row['Change_Pct']
+                else:
+                    current_rally_days += 1
+                    current_rally_change += row['Change_Pct']
+            else:
+                # Fine del rally
+                if current_rally_days > best_rally["total_days"]:
+                    best_rally = {
+                        "start_date": current_rally_start.strftime('%Y-%m-%d'),
+                        "total_days": current_rally_days,
+                        "change": round(current_rally_change, 4)
+                    }
+                current_rally_start = None
+                current_rally_days = 0
+                current_rally_change = 0.0
+        
+        # Controlla l'ultimo rally se il dataset finisce con giorni positivi
+        if current_rally_days > best_rally["total_days"]:
+            best_rally = {
+                "start_date": current_rally_start.strftime('%Y-%m-%d'),
+                "total_days": current_rally_days,
+                "change": round(current_rally_change, 4)
+            }
+        
+        return best_rally
+    
+    def _find_worst_decline(self, df):
+        """Trova il peggior decline (sequenza di giorni negativi consecutivi)"""
+        if len(df) == 0:
+            return {"start_date": "N/A", "total_days": 0, "change": 0.0}
+        
+        worst_decline = {"start_date": "N/A", "total_days": 0, "change": 0.0}
+        current_decline_start = None
+        current_decline_days = 0
+        current_decline_change = 0.0
+        
+        for i, row in df.iterrows():
+            if row['Change_Pct'] < 0:
+                if current_decline_start is None:
+                    current_decline_start = row['Date']
+                    current_decline_days = 1
+                    current_decline_change = row['Change_Pct']
+                else:
+                    current_decline_days += 1
+                    current_decline_change += row['Change_Pct']
+            else:
+                # Fine del decline
+                if current_decline_days > worst_decline["total_days"]:
+                    worst_decline = {
+                        "start_date": current_decline_start.strftime('%Y-%m-%d'),
+                        "total_days": current_decline_days,
+                        "change": round(current_decline_change, 4)
+                    }
+                current_decline_start = None
+                current_decline_days = 0
+                current_decline_change = 0.0
+        
+        # Controlla l'ultimo decline se il dataset finisce con giorni negativi
+        if current_decline_days > worst_decline["total_days"]:
+            worst_decline = {
+                "start_date": current_decline_start.strftime('%Y-%m-%d'),
+                "total_days": current_decline_days,
+                "change": round(current_decline_change, 4)
+            }
+        
+        return worst_decline
+    
+    def _get_missing_dates_details(self, df):
+        """Calcola dettagli delle date mancanti"""
+        if len(df) == 0:
+            return {"count": 0, "dates": []}
+        
+        # Genera tutte le date possibili nel range (solo giorni lavorativi)
+        start_date = df['Date'].min()
+        end_date = df['Date'].max()
+        
+        all_business_days = pd.bdate_range(start=start_date, end=end_date)
+        existing_dates = set(df['Date'].dt.date)
+        
+        missing_dates = []
+        for date in all_business_days:
+            if date.date() not in existing_dates:
+                missing_dates.append(date.strftime('%Y-%m-%d'))
+        
+        return {
+            "count": len(missing_dates),
+            "dates": missing_dates[:20] if len(missing_dates) > 20 else missing_dates,  # Limita a 20 per non appesantire
+            "total_missing": len(missing_dates)
+        }
 
 def main():
     parser = argparse.ArgumentParser(description='Core Oil Analyzer - Program 1: Complete Automatic Analysis')
