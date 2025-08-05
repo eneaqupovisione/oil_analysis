@@ -55,8 +55,10 @@ class OilAnalyzer:
             if filter_name == "years" and isinstance(filter_value, list):
                 filtered_df = filtered_df[filtered_df['Year'].isin(filter_value)]
             elif filter_name == "quarters" and isinstance(filter_value, list):
-                # Il tuo dataset ha Quarter come string (Q1, Q2, Q3, Q4)
-                filtered_df = filtered_df[filtered_df['Quarter'].isin(filter_value)]
+                # Il dataset ha Quarter come "2010-Q1", ma il filtro usa "Q1"
+                # Filtra per tutti i quarter che terminano con i valori selezionati
+                quarter_filter = filtered_df['Quarter'].str.endswith(tuple(q[1:] for q in filter_value))  # Rimuove "Q" e cerca per "1", "2", etc.
+                filtered_df = filtered_df[quarter_filter]
             elif filter_name == "months" and isinstance(filter_value, list):
                 filtered_df = filtered_df[filtered_df['Month'].isin(filter_value)]
             elif filter_name == "days_of_week" and isinstance(filter_value, list):
@@ -288,27 +290,34 @@ class OilAnalyzer:
         }
     
     def calculate_extreme_events(self, df: pd.DataFrame) -> Dict[str, float]:
-        """Calcola extreme events (2σ)"""
+        """Calcola extreme events con soglie percentuali (1%, 3%, 5%)"""
         if len(df) == 0:
             return {}
         
         returns = df['Return']
-        std_dev = returns.std()
-        mean_return = returns.mean()
         
-        threshold_up = mean_return + 2 * std_dev
-        threshold_down = mean_return - 2 * std_dev
+        # Soglie percentuali fisse
+        thresholds = [1, 3, 5]
+        results = {}
         
-        days_above_2sigma = (returns > threshold_up).sum()
-        days_below_2sigma = (returns < threshold_down).sum()
+        for threshold in thresholds:
+            # Movimenti positivi sopra soglia
+            days_above = (returns > threshold).sum()
+            days_above_pct = (days_above / len(df)) * 100
+            
+            # Movimenti negativi sotto soglia
+            days_below = (returns < -threshold).sum()
+            days_below_pct = (days_below / len(df)) * 100
+            
+            results[f'Days_Above_{threshold}pct'] = days_above
+            results[f'Days_Below_{threshold}pct'] = days_below
+            results[f'Days_Above_{threshold}pct_Percentage'] = days_above_pct
+            results[f'Days_Below_{threshold}pct_Percentage'] = days_below_pct
         
-        return {
-            'Days_Above_2Sigma': days_above_2sigma,
-            'Days_Below_2Sigma': days_below_2sigma,
-            'Days_Above_2Sigma_Pct': (days_above_2sigma / len(df)) * 100,
-            'Days_Below_2Sigma_Pct': (days_below_2sigma / len(df)) * 100,
-            'Return_Std_Dev': std_dev,
-        }
+        # Aggiungi anche la deviazione standard per riferimento
+        results['Return_Std_Dev'] = returns.std()
+        
+        return results
     
     def calculate_mean_reversion_advanced(self, df: pd.DataFrame) -> Dict[str, float]:
         """Calcola mean reversion metrics avanzate"""
@@ -553,7 +562,9 @@ def create_streamlit_app():
             
             # Quarters filter
             if 'Quarter' in df.columns:
-                available_quarters = sorted(df['Quarter'].unique())
+                # Estrae solo la parte Q1, Q2, Q3, Q4 dai quarter completi (es: "2010-Q1" -> "Q1")
+                quarter_parts = df['Quarter'].str.split('-Q').str[1]  # Prende la parte dopo "-Q"
+                available_quarters = sorted(['Q' + q for q in quarter_parts.dropna().unique() if q.isdigit()])
             else:
                 available_quarters = ['Q1', 'Q2', 'Q3', 'Q4']
             
@@ -742,23 +753,36 @@ def create_streamlit_app():
                             st.metric(label, f"{value:.2f}" if not pd.isna(value) else "N/A", delta_color=color)
                 
                 st.subheader("⚡ Extreme Events")
-                extreme_cols = st.columns(5)
-                extreme_map = {
-                    'Extreme_Days_Above_2Sigma': 'Days > 2σ',
-                    'Extreme_Days_Below_2Sigma': 'Days < -2σ',
-                    'Extreme_Days_Above_2Sigma_Pct': 'Days > 2σ (%)',
-                    'Extreme_Days_Below_2Sigma_Pct': 'Days < -2σ (%)',
-                    'Extreme_Return_Std_Dev': 'Std Deviation (%)',
-                }
-                for i, (key, label) in enumerate(extreme_map.items()):
-                    if key in results:
-                        with extreme_cols[i % 5]:
-                            value = results[key]
-                            if 'Pct' in key or 'Std_Dev' in key:
-                                display_val = f"{value:.2f}" if not pd.isna(value) else "N/A"
-                            else:
-                                display_val = f"{int(value)}" if not pd.isna(value) else "N/A"
-                            st.metric(label, display_val)
+                
+                # Mostra le soglie percentuali in modo organizzato
+                for threshold in [1, 3, 5]:
+                    st.markdown(f"**Movimenti > {threshold}%:**")
+                    extreme_cols = st.columns(4)
+                    
+                    # Preparazione delle metriche per questa soglia
+                    threshold_metrics = {
+                        f'Extreme_Days_Above_{threshold}pct': f'Days > +{threshold}%',
+                        f'Extreme_Days_Below_{threshold}pct': f'Days < -{threshold}%',
+                        f'Extreme_Days_Above_{threshold}pct_Percentage': f'Days > +{threshold}% (%)',
+                        f'Extreme_Days_Below_{threshold}pct_Percentage': f'Days < -{threshold}% (%)',
+                    }
+                    
+                    for i, (key, label) in enumerate(threshold_metrics.items()):
+                        if key in results:
+                            with extreme_cols[i % 4]:
+                                value = results[key]
+                                if 'Percentage' in key:
+                                    display_val = f"{value:.2f}" if not pd.isna(value) else "N/A"
+                                else:
+                                    display_val = f"{int(value)}" if not pd.isna(value) else "N/A"
+                                st.metric(label, display_val)
+                
+                # Deviazione standard come riferimento
+                if 'Extreme_Return_Std_Dev' in results:
+                    st.markdown("**Riferimento Statistico:**")
+                    ref_col = st.columns(1)[0]
+                    with ref_col:
+                        st.metric("Std Deviation (%)", f"{results['Extreme_Return_Std_Dev']:.2f}" if not pd.isna(results['Extreme_Return_Std_Dev']) else "N/A")
                 
                 st.subheader("🔄 Mean Reversion Analysis")
                 mean_rev_cols = st.columns(3)
@@ -905,4 +929,3 @@ def create_streamlit_app():
 
 if __name__ == "__main__":
     create_streamlit_app()
-    
