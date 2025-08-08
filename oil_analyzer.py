@@ -1963,54 +1963,439 @@ def create_streamlit_app():
                                     st.write(f"Is NaN: {pd.isna(prev_week_corr)}")
                 
                 # Export functionality
-                st.subheader("💾 Export Data")
+                st.subheader("💾 Export Data Avanzato")
                 
-                # Create export dataframe
-                filter_desc = []
-                for k, v in filters.items():
-                    if v not in [None, [], "All"]:
-                        if isinstance(v, list):
-                            filter_desc.append(f"{k}: {', '.join(map(str, v))}")
+                # Tabs per diversi tipi di export
+                export_tab1, export_tab2 = st.tabs(["📄 Export Singolo", "🔄 Export Multiplo"])
+                
+                with export_tab1:
+                    st.markdown("**Export dell'analisi corrente con i filtri applicati**")
+                    
+                    # Create export dataframe
+                    filter_desc = []
+                    for k, v in filters.items():
+                        if v not in [None, [], "All"]:
+                            if isinstance(v, list):
+                                filter_desc.append(f"{k}: {', '.join(map(str, v))}")
+                            else:
+                                filter_desc.append(f"{k}: {v}")
+                    
+                    filter_string = "; ".join(filter_desc) if filter_desc else "No filters"
+                    
+                    row_data = {
+                        'Timeframe': timeframe,
+                        'Filters': filter_string,
+                        'Data_Points': results['data_points'],
+                        'Date_Range': results['date_range']
+                    }
+                    
+                    # Add all metrics to export
+                    for key, value in results.items():
+                        if key not in ['timeframe', 'filters_applied', 'data_points', 'date_range']:
+                            if isinstance(value, dict):
+                                continue  # Skip frequency dictionaries for now
+                            row_data[key] = value
+                    
+                    export_df = pd.DataFrame([row_data])
+                    
+                    # Export buttons
+                    export_cols = st.columns(2)
+                    with export_cols[0]:
+                        csv = export_df.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download CSV",
+                            data=csv,
+                            file_name=f"oil_analysis_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv"
+                        )
+                    
+                    with export_cols[1]:
+                        json_data = export_df.to_json(orient='records', indent=2)
+                        st.download_button(
+                            label="📥 Download JSON", 
+                            data=json_data,
+                            file_name=f"oil_analysis_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                            mime="application/json"
+                        )
+                
+                with export_tab2:
+                    st.markdown("**Export automatico su più periodi mantenendo gli altri filtri**")
+                    
+                    # Opzioni di export multiplo
+                    export_type = st.selectbox(
+                        "🎯 Tipo di Export Multiplo",
+                        [
+                            # Iterazioni per Anni
+                            "Tutti gli anni (uno alla volta)",
+                            "Ultimi N anni",
+                            "Range di anni personalizzato", 
+                            "Anni specifici",
+                            # Iterazioni per Mesi
+                            "Tutti i mesi di tutti gli anni",
+                            "Tutti i mesi di anni specifici",
+                            "Mesi specifici di tutti gli anni",
+                            "Mesi specifici di anni specifici",
+                            # Iterazioni per Settimane
+                            "Tutte le settimane di tutti gli anni",
+                            "Tutte le settimane di anni specifici",
+                            "Settimane specifiche di tutti gli anni",
+                            # Iterazioni per Giorni Settimana
+                            "Tutti i giorni settimana di tutti gli anni",
+                            "Giorni settimana specifici di tutti gli anni",
+                            "Giorni settimana specifici di anni specifici"
+                        ]
+                    )
+                    
+                    # Ottieni anni disponibili
+                    if 'Year' in df.columns:
+                        available_years = sorted(df['Year'].unique())
+                    else:
+                        date_col = pd.to_datetime(df['Date'])
+                        available_years = sorted(date_col.dt.year.unique())
+                    
+                    iterations_to_process = []
+                    
+                    # ===== ITERAZIONI PER ANNI =====
+                    if export_type == "Tutti gli anni (uno alla volta)":
+                        iterations_to_process = [{'type': 'year', 'year': year} for year in available_years]
+                        st.info(f"📊 Verranno processati {len(iterations_to_process)} anni: {min(available_years)}-{max(available_years)}")
+                    
+                    elif export_type == "Ultimi N anni":
+                        n_years = st.slider("Quanti anni?", min_value=1, max_value=len(available_years), value=3)
+                        selected_years = available_years[-n_years:]
+                        iterations_to_process = [{'type': 'year', 'year': year} for year in selected_years]
+                        st.info(f"📊 Ultimi {n_years} anni: {selected_years}")
+                    
+                    elif export_type == "Range di anni personalizzato":
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            start_year = st.selectbox("Anno di inizio", available_years, index=0)
+                        with col2:
+                            end_year = st.selectbox("Anno di fine", available_years, index=len(available_years)-1)
+                        
+                        if start_year <= end_year:
+                            selected_years = [y for y in available_years if start_year <= y <= end_year]
+                            iterations_to_process = [{'type': 'year', 'year': year} for year in selected_years]
+                            st.info(f"📊 Range {start_year}-{end_year}: {len(selected_years)} anni")
                         else:
-                            filter_desc.append(f"{k}: {v}")
-                
-                filter_string = "; ".join(filter_desc) if filter_desc else "No filters"
-                
-                row_data = {
-                    'Timeframe': timeframe,
-                    'Filters': filter_string,
-                    'Data_Points': results['data_points'],
-                    'Date_Range': results['date_range']
-                }
-                
-                # Add all metrics to export
-                for key, value in results.items():
-                    if key not in ['timeframe', 'filters_applied', 'data_points', 'date_range']:
-                        if isinstance(value, dict):
-                            continue  # Skip frequency dictionaries for now
-                        row_data[key] = value
-                
-                export_df = pd.DataFrame([row_data])
-                
-                # Export buttons
-                export_cols = st.columns(2)
-                with export_cols[0]:
-                    csv = export_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download CSV",
-                        data=csv,
-                        file_name=f"oil_analysis_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-                
-                with export_cols[1]:
-                    json_data = export_df.to_json(orient='records', indent=2)
-                    st.download_button(
-                        label="📥 Download JSON", 
-                        data=json_data,
-                        file_name=f"oil_analysis_{timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                        mime="application/json"
-                    )
+                            st.error("Anno di inizio deve essere <= anno di fine")
+                    
+                    elif export_type == "Anni specifici":
+                        selected_years = st.multiselect(
+                            "Seleziona anni specifici",
+                            available_years,
+                            default=available_years[-3:] if len(available_years) >= 3 else available_years
+                        )
+                        iterations_to_process = [{'type': 'year', 'year': year} for year in selected_years]
+                        st.info(f"📊 Anni selezionati: {selected_years}")
+                    
+                    # ===== ITERAZIONI PER MESI =====
+                    elif export_type == "Tutti i mesi di tutti gli anni":
+                        for year in available_years:
+                            for month in range(1, 13):
+                                iterations_to_process.append({'type': 'month', 'year': year, 'month': month})
+                        st.info(f"📊 Verranno processati {len(iterations_to_process)} combinazioni anno-mese")
+                    
+                    elif export_type == "Tutti i mesi di anni specifici":
+                        selected_years = st.multiselect("Seleziona anni", available_years, default=available_years[-2:] if len(available_years) >= 2 else available_years)
+                        for year in selected_years:
+                            for month in range(1, 13):
+                                iterations_to_process.append({'type': 'month', 'year': year, 'month': month})
+                        st.info(f"📊 {len(selected_years)} anni × 12 mesi = {len(iterations_to_process)} iterazioni")
+                    
+                    elif export_type == "Mesi specifici di tutti gli anni":
+                        months = st.multiselect("Seleziona mesi", list(range(1, 13)), 
+                                               format_func=lambda x: f"{x} - {['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][x-1]}",
+                                               default=[1, 2, 3])
+                        for year in available_years:
+                            for month in months:
+                                iterations_to_process.append({'type': 'month', 'year': year, 'month': month})
+                        st.info(f"📊 {len(available_years)} anni × {len(months)} mesi = {len(iterations_to_process)} iterazioni")
+                    
+                    elif export_type == "Mesi specifici di anni specifici":
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            selected_years = st.multiselect("Seleziona anni", available_years, default=available_years[-2:] if len(available_years) >= 2 else available_years)
+                        with col2:
+                            months = st.multiselect("Seleziona mesi", list(range(1, 13)),
+                                                   format_func=lambda x: f"{x} - {['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'][x-1]}",
+                                                   default=[1, 2, 3])
+                        for year in selected_years:
+                            for month in months:
+                                iterations_to_process.append({'type': 'month', 'year': year, 'month': month})
+                        st.info(f"📊 {len(selected_years)} anni × {len(months)} mesi = {len(iterations_to_process)} iterazioni")
+                    
+                    # ===== ITERAZIONI PER SETTIMANE =====
+                    elif export_type == "Tutte le settimane di tutti gli anni":
+                        for year in available_years:
+                            for week in range(1, 54):  # Massimo 53 settimane in un anno
+                                iterations_to_process.append({'type': 'week', 'year': year, 'week': week})
+                        st.info(f"📊 Verranno processate fino a {len(iterations_to_process)} combinazioni anno-settimana")
+                        st.warning("⚠️ Alcune settimane potrebbero non contenere dati")
+                    
+                    elif export_type == "Tutte le settimane di anni specifici":
+                        selected_years = st.multiselect("Seleziona anni", available_years, default=available_years[-1:])
+                        for year in selected_years:
+                            for week in range(1, 54):
+                                iterations_to_process.append({'type': 'week', 'year': year, 'week': week})
+                        st.info(f"📊 {len(selected_years)} anni × ~52 settimane = ~{len(iterations_to_process)} iterazioni")
+                        st.warning("⚠️ Alcune settimane potrebbero non contenere dati")
+                    
+                    elif export_type == "Settimane specifiche di tutti gli anni":
+                        weeks = st.multiselect("Seleziona settimane", list(range(1, 54)), default=[1, 13, 26, 39, 52])
+                        for year in available_years:
+                            for week in weeks:
+                                iterations_to_process.append({'type': 'week', 'year': year, 'week': week})
+                        st.info(f"📊 {len(available_years)} anni × {len(weeks)} settimane = {len(iterations_to_process)} iterazioni")
+                    
+                    # ===== ITERAZIONI PER GIORNI DELLA SETTIMANA =====
+                    elif export_type == "Tutti i giorni settimana di tutti gli anni":
+                        weekdays = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì']
+                        for year in available_years:
+                            for weekday in weekdays:
+                                iterations_to_process.append({'type': 'weekday', 'year': year, 'weekday': weekday})
+                        st.info(f"📊 {len(available_years)} anni × {len(weekdays)} giorni = {len(iterations_to_process)} iterazioni")
+                    
+                    elif export_type == "Giorni settimana specifici di tutti gli anni":
+                        weekdays = st.multiselect("Seleziona giorni", ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì'], default=['Lunedì', 'Venerdì'])
+                        for year in available_years:
+                            for weekday in weekdays:
+                                iterations_to_process.append({'type': 'weekday', 'year': year, 'weekday': weekday})
+                        st.info(f"📊 {len(available_years)} anni × {len(weekdays)} giorni = {len(iterations_to_process)} iterazioni")
+                    
+                    elif export_type == "Giorni settimana specifici di anni specifici":
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            selected_years = st.multiselect("Seleziona anni", available_years, default=available_years[-2:] if len(available_years) >= 2 else available_years)
+                        with col2:
+                            weekdays = st.multiselect("Seleziona giorni", ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì'], default=['Lunedì', 'Venerdì'])
+                        for year in selected_years:
+                            for weekday in weekdays:
+                                iterations_to_process.append({'type': 'weekday', 'year': year, 'weekday': weekday})
+                        st.info(f"📊 {len(selected_years)} anni × {len(weekdays)} giorni = {len(iterations_to_process)} iterazioni")
+                    
+                    # Mantieni altri filtri
+                    st.markdown("**Altri filtri mantenuti:**")
+                    other_filters = {k: v for k, v in filters.items() if k != 'years' and v not in [None, [], "All"]}
+                    if other_filters:
+                        for k, v in other_filters.items():
+                            if isinstance(v, list):
+                                st.caption(f"• {k}: {', '.join(map(str, v))}")
+                            else:
+                                st.caption(f"• {k}: {v}")
+                    else:
+                        st.caption("• Nessun altro filtro applicato")
+                    
+                    # Pulsante per avviare export multiplo
+                    if st.button("🚀 Avvia Export Multiplo", disabled=len(iterations_to_process) == 0):
+                        export_results = []
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        for i, iteration in enumerate(iterations_to_process):
+                            iteration_type = iteration['type']
+                            
+                            # Prepara descrizione e filtri per questa iterazione
+                            if iteration_type == 'year':
+                                year = iteration['year']
+                                status_text.text(f"Processando anno {year}... ({i+1}/{len(iterations_to_process)})")
+                                temp_filters = filters.copy()
+                                temp_filters['years'] = [year]
+                                iteration_desc = f"Anno: {year}"
+                                
+                            elif iteration_type == 'month':
+                                year, month = iteration['year'], iteration['month']
+                                month_names = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic']
+                                status_text.text(f"Processando {month_names[month-1]} {year}... ({i+1}/{len(iterations_to_process)})")
+                                temp_filters = filters.copy()
+                                temp_filters['years'] = [year]
+                                temp_filters['months'] = [month]
+                                iteration_desc = f"Anno: {year}, Mese: {month} ({month_names[month-1]})"
+                                
+                            elif iteration_type == 'week':
+                                year, week = iteration['year'], iteration['week']
+                                status_text.text(f"Processando settimana {week} del {year}... ({i+1}/{len(iterations_to_process)})")
+                                temp_filters = filters.copy()
+                                temp_filters['years'] = [year]
+                                temp_filters['weeks'] = [week]
+                                iteration_desc = f"Anno: {year}, Settimana: {week}"
+                                
+                            elif iteration_type == 'weekday':
+                                year, weekday = iteration['year'], iteration['weekday']
+                                status_text.text(f"Processando {weekday} del {year}... ({i+1}/{len(iterations_to_process)})")
+                                temp_filters = filters.copy()
+                                temp_filters['years'] = [year]
+                                temp_filters['weekdays'] = [weekday]
+                                iteration_desc = f"Anno: {year}, Giorno: {weekday}"
+                            
+                            try:
+                                # Crea un nuovo analyzer temporaneo per questa iterazione
+                                temp_analyzer = OilAnalyzer(df)
+                                filtered_df = temp_analyzer.apply_filters(temp_filters)
+                                
+                                if len(filtered_df) > 0:
+                                    # Esegui analisi weekday solo se timeframe è Daily
+                                    if timeframe == "Daily":
+                                        iteration_results = temp_analyzer.calculate_weekday_behavior_analysis(filtered_df)
+                                        
+                                        # Prepara dati per export
+                                        filter_desc = []
+                                        filter_desc.append(iteration_desc)
+                                        for k, v in other_filters.items():
+                                            if isinstance(v, list):
+                                                filter_desc.append(f"{k}: {', '.join(map(str, v))}")
+                                            else:
+                                                filter_desc.append(f"{k}: {v}")
+                                        
+                                        row_data = {
+                                            'Iteration_Type': iteration_type,
+                                            'Timeframe': timeframe,
+                                            'Filters_Applied': "; ".join(filter_desc),
+                                            'Analysis_Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                            'Records_Analyzed': len(filtered_df)
+                                        }
+                                        
+                                        # Aggiungi dettagli specifici per tipo di iterazione
+                                        if iteration_type == 'year':
+                                            row_data['Year'] = iteration['year']
+                                        elif iteration_type == 'month':
+                                            row_data['Year'] = iteration['year']
+                                            row_data['Month'] = iteration['month']
+                                        elif iteration_type == 'week':
+                                            row_data['Year'] = iteration['year']
+                                            row_data['Week'] = iteration['week']
+                                        elif iteration_type == 'weekday':
+                                            row_data['Year'] = iteration['year']
+                                            row_data['Weekday'] = iteration['weekday']
+                                        
+                                        # Aggiungi tutte le metriche
+                                        for key, value in iteration_results.items():
+                                            if not isinstance(value, dict):
+                                                row_data[f"Weekday_{key}"] = value
+                                        
+                                        export_results.append(row_data)
+                                    else:
+                                        st.warning(f"Iterazione {i+1}: Analisi weekday disponibile solo per timeframe Daily")
+                                else:
+                                    st.warning(f"Iterazione {i+1}: Nessun dato disponibile con i filtri applicati")
+                            
+                            except Exception as e:
+                                st.error(f"Errore processando iterazione {i+1}: {str(e)}")
+                            
+                            progress_bar.progress((i + 1) / len(iterations_to_process))
+                        
+                        status_text.text("✅ Export completato!")
+                        
+                        if export_results:
+                            # Crea DataFrame finale
+                            multi_export_df = pd.DataFrame(export_results)
+                            
+                            st.success(f"✅ Processati {len(export_results)} anni con successo!")
+                            
+                            # Mostra anteprima
+                            st.markdown("**📋 Anteprima risultati:**")
+                            preview_cols = ['Year', 'Records_Analyzed']
+                            if 'Weekday_Total_Weeks_Analyzed' in multi_export_df.columns:
+                                preview_cols.append('Weekday_Total_Weeks_Analyzed')
+                            if 'Weekday_Prob_Week_Positive_Given_Monday_Positive' in multi_export_df.columns:
+                                preview_cols.append('Weekday_Prob_Week_Positive_Given_Monday_Positive')
+                            
+                            st.dataframe(multi_export_df[preview_cols].head(10))
+                            
+                            # Export buttons per dataset multiplo
+                            
+                            # Crea nome file più specifico basato sul tipo di iterazione
+                            iteration_years = [item['year'] for item in iterations_to_process]
+                            unique_years = sorted(set(iteration_years))
+                            
+                            if export_type == "Tutti gli anni (uno alla volta)":
+                                file_suffix = f"tutti_anni_{min(unique_years)}-{max(unique_years)}"
+                            elif export_type == "Ultimi N anni":
+                                file_suffix = f"ultimi_{len(unique_years)}_anni_{min(unique_years)}-{max(unique_years)}"
+                            elif export_type == "Range di anni personalizzato":
+                                file_suffix = f"range_{min(unique_years)}-{max(unique_years)}"
+                            elif export_type == "Anni specifici":
+                                if len(unique_years) <= 3:
+                                    file_suffix = f"anni_{'_'.join(map(str, unique_years))}"
+                                else:
+                                    file_suffix = f"anni_specifici_{len(unique_years)}_anni_{min(unique_years)}-{max(unique_years)}"
+                            
+                            # Nomi per iterazioni di mesi
+                            elif "mesi" in export_type.lower():
+                                months = sorted(set([item.get('month', 0) for item in iterations_to_process if 'month' in item]))
+                                if len(months) == 12:
+                                    month_part = "tutti_mesi"
+                                elif len(months) <= 3:
+                                    month_part = f"mesi_{'_'.join(map(str, months))}"
+                                else:
+                                    month_part = f"{len(months)}_mesi"
+                                
+                                if len(unique_years) <= 3:
+                                    file_suffix = f"{month_part}_anni_{'_'.join(map(str, unique_years))}"
+                                else:
+                                    file_suffix = f"{month_part}_{len(unique_years)}_anni_{min(unique_years)}-{max(unique_years)}"
+                            
+                            # Nomi per iterazioni di settimane
+                            elif "settimane" in export_type.lower():
+                                weeks = sorted(set([item.get('week', 0) for item in iterations_to_process if 'week' in item]))
+                                if len(weeks) <= 5:
+                                    week_part = f"settimane_{'_'.join(map(str, weeks))}"
+                                else:
+                                    week_part = f"{len(weeks)}_settimane"
+                                
+                                if len(unique_years) <= 3:
+                                    file_suffix = f"{week_part}_anni_{'_'.join(map(str, unique_years))}"
+                                else:
+                                    file_suffix = f"{week_part}_{len(unique_years)}_anni_{min(unique_years)}-{max(unique_years)}"
+                            
+                            # Nomi per iterazioni di giorni della settimana
+                            elif "giorni" in export_type.lower():
+                                weekdays = sorted(set([item.get('weekday', '') for item in iterations_to_process if 'weekday' in item]))
+                                weekday_part = f"giorni_{'_'.join([w[:3] for w in weekdays])}"
+                                
+                                if len(unique_years) <= 3:
+                                    file_suffix = f"{weekday_part}_anni_{'_'.join(map(str, unique_years))}"
+                                else:
+                                    file_suffix = f"{weekday_part}_{len(unique_years)}_anni_{min(unique_years)}-{max(unique_years)}"
+                            
+                            else:
+                                # Default fallback
+                                file_suffix = f"iterazioni_{len(iterations_to_process)}_{min(unique_years)}-{max(unique_years)}"
+                            
+                            # Aggiungi filtri al nome se presenti
+                            if other_filters:
+                                filter_parts = []
+                                for k, v in other_filters.items():
+                                    if isinstance(v, list) and len(v) <= 2:
+                                        filter_parts.append(f"{k}_{'_'.join(map(str, v))}")
+                                    elif not isinstance(v, list):
+                                        filter_parts.append(f"{k}_{v}")
+                                    else:
+                                        filter_parts.append(f"{k}_multiple")
+                                
+                                if filter_parts:
+                                    file_suffix += f"_filtri_{'_'.join(filter_parts)}"
+                            
+                            multi_export_cols = st.columns(2)
+                            with multi_export_cols[0]:
+                                csv_multi = multi_export_df.to_csv(index=False)
+                                st.download_button(
+                                    label="📥 Download Multi-CSV",
+                                    data=csv_multi,
+                                    file_name=f"oil_weekday_analysis_{file_suffix}.csv",
+                                    mime="text/csv"
+                                )
+                            
+                            with multi_export_cols[1]:
+                                json_multi = multi_export_df.to_json(orient='records', indent=2)
+                                st.download_button(
+                                    label="📥 Download Multi-JSON",
+                                    data=json_multi,
+                                    file_name=f"oil_weekday_analysis_{file_suffix}.json",
+                                    mime="application/json"
+                                )
+                        else:
+                            st.error("❌ Nessun risultato da esportare. Verifica filtri e dati disponibili.")
                     
         except Exception as e:
             st.error(f"Errore nel processing dei dati: {str(e)}")
