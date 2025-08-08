@@ -832,70 +832,128 @@ class OilAnalyzer:
         
         # Correlazione tra return del lunedì e return settimanale
         monday_weekly_correlation = weekly_df['monday_return'].corr(weekly_df['weekly_return_pct'])
+        
+        # Debug: Verifica se la correlazione è NaN o molto piccola
+        if pd.isna(monday_weekly_correlation):
+            monday_weekly_correlation = 0.0
+        
         results['Monday_Weekly_Return_Correlation'] = monday_weekly_correlation
         
         # Return medi
         results['Avg_Weekly_Return_When_Monday_Positive'] = monday_positive_weeks['weekly_return_pct'].mean() if len(monday_positive_weeks) > 0 else np.nan
         results['Avg_Weekly_Return_When_Monday_Negative'] = monday_negative_weeks['weekly_return_pct'].mean() if len(monday_negative_weeks) > 0 else np.nan
         
+        # ===== NUOVE ANALISI DI CONCORDANZA =====
+        
+        # Filtra solo i casi di "concordanza" tra lunedì e settimana
+        monday_pos_week_pos = weekly_df[weekly_df['monday_positive'] & weekly_df['weekly_positive']]  # 66.1%
+        monday_neg_week_neg = weekly_df[~weekly_df['monday_positive'] & ~weekly_df['weekly_positive']]  # 61.3%
+        
+        # Per i casi Lunedì+ → Settimana+ (66.1%)
+        if len(monday_pos_week_pos) > 0:
+            # Return medio settimanale (Open Lunedì → Close Venerdì)
+            results['Avg_Weekly_Return_When_Monday_Pos_Week_Pos'] = monday_pos_week_pos['weekly_return_pct'].mean()
+            
+            # Return medio dalla chiusura del lunedì (Close Lunedì → Close Venerdì)
+            monday_pos_week_pos_friday_close_to_monday_close = []
+            for _, row in monday_pos_week_pos.iterrows():
+                year, week = row['year'], row['week']
+                week_data = df_sorted[(df_sorted['Year'] == year) & (df_sorted['Week_Year'] == week)]
+                
+                monday_data = week_data[week_data['Day_of_Week'] == monday_name]
+                friday_data = week_data[week_data['Day_of_Week'] == friday_name]
+                
+                if len(monday_data) > 0 and len(friday_data) > 0:
+                    monday_close = monday_data['Close'].iloc[0]
+                    friday_close = friday_data['Close'].iloc[0]
+                    
+                    # Return da Close Lunedì a Close Venerdì
+                    monday_close_to_friday_return = ((friday_close - monday_close) / monday_close) * 100
+                    monday_pos_week_pos_friday_close_to_monday_close.append(monday_close_to_friday_return)
+            
+            results['Avg_Monday_Close_To_Friday_Return_When_Monday_Pos_Week_Pos'] = np.mean(monday_pos_week_pos_friday_close_to_monday_close) if monday_pos_week_pos_friday_close_to_monday_close else np.nan
+            results['Count_Monday_Pos_Week_Pos_Cases'] = len(monday_pos_week_pos)
+        
+        # Per i casi Lunedì- → Settimana- (61.3%)
+        if len(monday_neg_week_neg) > 0:
+            # Return medio settimanale (Open Lunedì → Close Venerdì)
+            results['Avg_Weekly_Return_When_Monday_Neg_Week_Neg'] = monday_neg_week_neg['weekly_return_pct'].mean()
+            
+            # Return medio dalla chiusura del lunedì (Close Lunedì → Close Venerdì)
+            monday_neg_week_neg_friday_close_to_monday_close = []
+            for _, row in monday_neg_week_neg.iterrows():
+                year, week = row['year'], row['week']
+                week_data = df_sorted[(df_sorted['Year'] == year) & (df_sorted['Week_Year'] == week)]
+                
+                monday_data = week_data[week_data['Day_of_Week'] == monday_name]
+                friday_data = week_data[week_data['Day_of_Week'] == friday_name]
+                
+                if len(monday_data) > 0 and len(friday_data) > 0:
+                    monday_close = monday_data['Close'].iloc[0]
+                    friday_close = friday_data['Close'].iloc[0]
+                    
+                    # Return da Close Lunedì a Close Venerdì
+                    monday_close_to_friday_return = ((friday_close - monday_close) / monday_close) * 100
+                    monday_neg_week_neg_friday_close_to_monday_close.append(monday_close_to_friday_return)
+            
+            results['Avg_Monday_Close_To_Friday_Return_When_Monday_Neg_Week_Neg'] = np.mean(monday_neg_week_neg_friday_close_to_monday_close) if monday_neg_week_neg_friday_close_to_monday_close else np.nan
+            results['Count_Monday_Neg_Week_Neg_Cases'] = len(monday_neg_week_neg)
+        
+        # ===== ANALISI VENERDÌ NEI CASI DI CONCORDANCE =====
+        
+        # 1. Per i casi Lunedì+ → Settimana+ (66.1%): che succede al Venerdì?
+        if len(monday_pos_week_pos) > 0:
+            friday_positive_count_in_pos_pos = 0
+            friday_analyzed_in_pos_pos = 0
+            
+            for _, row in monday_pos_week_pos.iterrows():
+                year, week = row['year'], row['week']
+                week_data = df_sorted[(df_sorted['Year'] == year) & (df_sorted['Week_Year'] == week)]
+                friday_data = week_data[week_data['Day_of_Week'] == friday_name]
+                
+                if len(friday_data) > 0:
+                    friday_analyzed_in_pos_pos += 1
+                    friday_return = friday_data['Change_Pct'].iloc[0]
+                    if friday_return > 0:
+                        friday_positive_count_in_pos_pos += 1
+            
+            if friday_analyzed_in_pos_pos > 0:
+                results['Prob_Friday_Positive_In_Monday_Pos_Week_Pos'] = (friday_positive_count_in_pos_pos / friday_analyzed_in_pos_pos) * 100
+                results['Prob_Friday_Negative_In_Monday_Pos_Week_Pos'] = ((friday_analyzed_in_pos_pos - friday_positive_count_in_pos_pos) / friday_analyzed_in_pos_pos) * 100
+                results['Count_Friday_Analyzed_In_Monday_Pos_Week_Pos'] = friday_analyzed_in_pos_pos
+            else:
+                results['Prob_Friday_Positive_In_Monday_Pos_Week_Pos'] = np.nan
+                results['Prob_Friday_Negative_In_Monday_Pos_Week_Pos'] = np.nan
+                results['Count_Friday_Analyzed_In_Monday_Pos_Week_Pos'] = 0
+        
+        # 2. Per i casi Lunedì- → Settimana- (61.3%): che succede al Venerdì?
+        if len(monday_neg_week_neg) > 0:
+            friday_positive_count_in_neg_neg = 0
+            friday_analyzed_in_neg_neg = 0
+            
+            for _, row in monday_neg_week_neg.iterrows():
+                year, week = row['year'], row['week']
+                week_data = df_sorted[(df_sorted['Year'] == year) & (df_sorted['Week_Year'] == week)]
+                friday_data = week_data[week_data['Day_of_Week'] == friday_name]
+                
+                if len(friday_data) > 0:
+                    friday_analyzed_in_neg_neg += 1
+                    friday_return = friday_data['Change_Pct'].iloc[0]
+                    if friday_return > 0:
+                        friday_positive_count_in_neg_neg += 1
+            
+            if friday_analyzed_in_neg_neg > 0:
+                results['Prob_Friday_Positive_In_Monday_Neg_Week_Neg'] = (friday_positive_count_in_neg_neg / friday_analyzed_in_neg_neg) * 100
+                results['Prob_Friday_Negative_In_Monday_Neg_Week_Neg'] = ((friday_analyzed_in_neg_neg - friday_positive_count_in_neg_neg) / friday_analyzed_in_neg_neg) * 100
+                results['Count_Friday_Analyzed_In_Monday_Neg_Week_Neg'] = friday_analyzed_in_neg_neg
+            else:
+                results['Prob_Friday_Positive_In_Monday_Neg_Week_Neg'] = np.nan
+                results['Prob_Friday_Negative_In_Monday_Neg_Week_Neg'] = np.nan
+                results['Count_Friday_Analyzed_In_Monday_Neg_Week_Neg'] = 0
+        
         # ===== NUOVE ANALISI =====
         
-        # 1. PROBABILITÀ LUNEDÌ → ALTRI GIORNI DELLA SETTIMANA
-        tuesday_name = 'Martedì' if use_italian else 'Tuesday'
-        wednesday_name = 'Mercoledì' if use_italian else 'Wednesday'
-        thursday_name = 'Giovedì' if use_italian else 'Thursday'
-        
-        other_days = [tuesday_name, wednesday_name, thursday_name, friday_name]
-        english_other_days = ['Tuesday', 'Wednesday', 'Thursday', 'Friday']
-        
-        for i, day_name in enumerate(other_days):
-            english_day = english_other_days[i]
-            
-            # Trova coppie Lunedì → giorno_x nella stessa settimana
-            monday_to_day_analysis = []
-            
-            for (year, week), week_group in df_sorted.groupby(['Year', 'Week_Year']):
-                monday_data = week_group[week_group['Day_of_Week'] == monday_name]
-                day_data = week_group[week_group['Day_of_Week'] == day_name]
-                
-                if len(monday_data) > 0 and len(day_data) > 0:
-                    monday_return = monday_data['Return'].iloc[0]
-                    day_return = day_data['Return'].iloc[0]
-                    monday_positive = monday_return > 0
-                    day_positive = day_return > 0
-                    
-                    monday_to_day_analysis.append({
-                        'monday_positive': monday_positive,
-                        'day_positive': day_positive
-                    })
-            
-            if monday_to_day_analysis:
-                monday_to_day_df = pd.DataFrame(monday_to_day_analysis)
-                
-                # Filtra per lunedì positivi e negativi
-                monday_pos = monday_to_day_df[monday_to_day_df['monday_positive']]
-                monday_neg = monday_to_day_df[~monday_to_day_df['monday_positive']]
-                
-                # P(giorno_x positivo | lunedì positivo)
-                if len(monday_pos) > 0:
-                    results[f'Prob_{english_day}_Positive_Given_Monday_Positive'] = (monday_pos['day_positive'].sum() / len(monday_pos)) * 100
-                    results[f'Prob_{english_day}_Negative_Given_Monday_Positive'] = ((len(monday_pos) - monday_pos['day_positive'].sum()) / len(monday_pos)) * 100
-                else:
-                    results[f'Prob_{english_day}_Positive_Given_Monday_Positive'] = np.nan
-                    results[f'Prob_{english_day}_Negative_Given_Monday_Positive'] = np.nan
-                
-                # P(giorno_x positivo | lunedì negativo)
-                if len(monday_neg) > 0:
-                    results[f'Prob_{english_day}_Positive_Given_Monday_Negative'] = (monday_neg['day_positive'].sum() / len(monday_neg)) * 100
-                    results[f'Prob_{english_day}_Negative_Given_Monday_Negative'] = ((len(monday_neg) - monday_neg['day_positive'].sum()) / len(monday_neg)) * 100
-                else:
-                    results[f'Prob_{english_day}_Positive_Given_Monday_Negative'] = np.nan
-                    results[f'Prob_{english_day}_Negative_Given_Monday_Negative'] = np.nan
-                
-                # Conteggi per statistica
-                results[f'{english_day}_Monday_Pairs_Analyzed'] = len(monday_to_day_analysis)
-        
-        # 2. PROBABILITÀ VENERDÌ PRECEDENTE → LUNEDÌ SUCCESSIVO
+        # 1. PROBABILITÀ VENERDÌ PRECEDENTE → LUNEDÌ SUCCESSIVO
         friday_to_monday_analysis = []
         
         # Raggruppa per trovare coppie Venerdì-Lunedì consecutive
@@ -952,6 +1010,102 @@ class OilAnalyzer:
             results['Friday_Monday_Consecutive_Pairs_Analyzed'] = len(friday_to_monday_analysis)
             results['Friday_Previous_Positive_Count'] = len(friday_pos)
             results['Friday_Previous_Negative_Count'] = len(friday_neg)
+        
+        # 3. PROBABILITÀ SETTIMANA PRECEDENTE → LUNEDÌ SUCCESSIVO
+        previous_week_to_monday_analysis = []
+        
+        # Crea lista di tutte le settimane con i loro risultati
+        weekly_results = []
+        for (year, week), week_group in df_sorted.groupby(['Year', 'Week_Year']):
+            monday_data = week_group[week_group['Day_of_Week'] == monday_name]
+            friday_data = week_group[week_group['Day_of_Week'] == friday_name]
+            
+            if len(monday_data) > 0 and len(friday_data) > 0:
+                monday_open = monday_data['Open'].iloc[0]
+                friday_close = friday_data['Close'].iloc[0]
+                monday_return = monday_data['Return'].iloc[0]
+                
+                # Performance settimanale: Close Venerdì vs Open Lunedì
+                weekly_return_pct = ((friday_close - monday_open) / monday_open) * 100
+                weekly_positive = weekly_return_pct > 0
+                monday_positive = monday_return > 0
+                
+                weekly_results.append({
+                    'year': year,
+                    'week': week,
+                    'weekly_positive': weekly_positive,
+                    'weekly_return_pct': weekly_return_pct,
+                    'monday_positive': monday_positive,
+                    'monday_return': monday_return,
+                    'monday_date': monday_data['Date'].iloc[0]
+                })
+        
+        # Ordina per data per trovare settimane consecutive
+        weekly_results_df = pd.DataFrame(weekly_results)
+        if len(weekly_results_df) > 1:
+            weekly_results_df = weekly_results_df.sort_values('monday_date').reset_index(drop=True)
+            
+            # Trova coppie settimana precedente → lunedì settimana successiva
+            for i in range(len(weekly_results_df) - 1):
+                current_week = weekly_results_df.iloc[i]
+                next_week = weekly_results_df.iloc[i + 1]
+                
+                current_monday_date = pd.to_datetime(current_week['monday_date'])
+                next_monday_date = pd.to_datetime(next_week['monday_date'])
+                
+                # Verifica che siano settimane consecutive (circa 7 giorni di distanza)
+                days_diff = (next_monday_date - current_monday_date).days
+                if 5 <= days_diff <= 9:  # Permette flessibilità per festivi
+                    previous_week_to_monday_analysis.append({
+                        'previous_week_positive': current_week['weekly_positive'],
+                        'previous_week_return': current_week['weekly_return_pct'],
+                        'next_monday_positive': next_week['monday_positive'],
+                        'next_monday_return': next_week['monday_return'],
+                        'previous_week_date': current_monday_date,
+                        'next_monday_date': next_monday_date
+                    })
+        
+        if previous_week_to_monday_analysis:
+            prev_week_to_monday_df = pd.DataFrame(previous_week_to_monday_analysis)
+            
+            # Filtra per settimane precedenti positive e negative
+            prev_week_pos = prev_week_to_monday_df[prev_week_to_monday_df['previous_week_positive']]
+            prev_week_neg = prev_week_to_monday_df[~prev_week_to_monday_df['previous_week_positive']]
+            
+            # P(lunedì positivo | settimana precedente positiva)
+            if len(prev_week_pos) > 0:
+                results['Prob_Monday_Positive_Given_Previous_Week_Positive'] = (prev_week_pos['next_monday_positive'].sum() / len(prev_week_pos)) * 100
+                results['Prob_Monday_Negative_Given_Previous_Week_Positive'] = ((len(prev_week_pos) - prev_week_pos['next_monday_positive'].sum()) / len(prev_week_pos)) * 100
+            else:
+                results['Prob_Monday_Positive_Given_Previous_Week_Positive'] = np.nan
+                results['Prob_Monday_Negative_Given_Previous_Week_Positive'] = np.nan
+            
+            # P(lunedì positivo | settimana precedente negativa)
+            if len(prev_week_neg) > 0:
+                results['Prob_Monday_Positive_Given_Previous_Week_Negative'] = (prev_week_neg['next_monday_positive'].sum() / len(prev_week_neg)) * 100
+                results['Prob_Monday_Negative_Given_Previous_Week_Negative'] = ((len(prev_week_neg) - prev_week_neg['next_monday_positive'].sum()) / len(prev_week_neg)) * 100
+            else:
+                results['Prob_Monday_Positive_Given_Previous_Week_Negative'] = np.nan
+                results['Prob_Monday_Negative_Given_Previous_Week_Negative'] = np.nan
+            
+            # Statistiche aggiuntive per settimana precedente → lunedì
+            results['Previous_Week_Monday_Consecutive_Pairs_Analyzed'] = len(previous_week_to_monday_analysis)
+            results['Previous_Week_Positive_Count'] = len(prev_week_pos)
+            results['Previous_Week_Negative_Count'] = len(prev_week_neg)
+            
+            # Return medi
+            results['Avg_Monday_Return_After_Positive_Week'] = prev_week_pos['next_monday_return'].mean() if len(prev_week_pos) > 0 else np.nan
+            results['Avg_Monday_Return_After_Negative_Week'] = prev_week_neg['next_monday_return'].mean() if len(prev_week_neg) > 0 else np.nan
+            
+            # Correlazione tra performance settimana precedente e lunedì successivo
+            if len(prev_week_to_monday_df) > 1:
+                prev_week_monday_correlation = prev_week_to_monday_df['previous_week_return'].corr(prev_week_to_monday_df['next_monday_return'])
+                
+                # Debug: Verifica se la correlazione è NaN o molto piccola
+                if pd.isna(prev_week_monday_correlation):
+                    prev_week_monday_correlation = 0.0
+                
+                results['Previous_Week_Monday_Return_Correlation'] = prev_week_monday_correlation
         
         return results
     
@@ -1513,6 +1667,92 @@ def create_streamlit_app():
                                             delta_color = "inverse"
                                     st.metric(label, f"{value:.1f}" if not pd.isna(value) else "N/A", delta_color=delta_color)
                         
+                        # 1.1 Analisi dei Movimenti nei Casi di Concordanza
+                        st.markdown("**💰 Entità dei Movimenti nei Casi di Concordanza**")
+                        
+                        # Casi Lunedì+ → Settimana+ (66.1%)
+                        if 'Weekday_Count_Monday_Pos_Week_Pos_Cases' in results:
+                            prob_pos = results.get('Weekday_Prob_Week_Positive_Given_Monday_Positive', 0)
+                            st.markdown(f"**Casi Lunedì+ → Settimana+ ({prob_pos:.1f}%):**")
+                            
+                            concordance_pos_cols = st.columns(3)
+                            concordance_pos_map = {
+                                'Weekday_Count_Monday_Pos_Week_Pos_Cases': 'Settimane Analizzate',
+                                'Weekday_Avg_Weekly_Return_When_Monday_Pos_Week_Pos': 'Return Medio Sett (Open Lun→Close Ven) %',
+                                'Weekday_Avg_Monday_Close_To_Friday_Return_When_Monday_Pos_Week_Pos': 'Return Medio (Close Lun→Close Ven) %',
+                            }
+                            
+                            for i, (key, label) in enumerate(concordance_pos_map.items()):
+                                if key in results:
+                                    with concordance_pos_cols[i % 3]:
+                                        value = results[key]
+                                        if 'Count' in key:
+                                            display_val = f"{int(value)}" if not pd.isna(value) else "N/A"
+                                            color = "normal"
+                                        else:
+                                            display_val = f"{value:.2f}" if not pd.isna(value) else "N/A"
+                                            color = "normal" if not pd.isna(value) and value > 0 else "inverse"
+                                        st.metric(label, display_val, delta_color=color)
+                        
+                        # Casi Lunedì- → Settimana- (61.3%)
+                        if 'Weekday_Count_Monday_Neg_Week_Neg_Cases' in results:
+                            prob_neg = results.get('Weekday_Prob_Week_Negative_Given_Monday_Negative', 0)
+                            st.markdown(f"**Casi Lunedì- → Settimana- ({prob_neg:.1f}%):**")
+                            
+                            concordance_neg_cols = st.columns(3)
+                            concordance_neg_map = {
+                                'Weekday_Count_Monday_Neg_Week_Neg_Cases': 'Settimane Analizzate',
+                                'Weekday_Avg_Weekly_Return_When_Monday_Neg_Week_Neg': 'Return Medio Sett (Open Lun→Close Ven) %',
+                                'Weekday_Avg_Monday_Close_To_Friday_Return_When_Monday_Neg_Week_Neg': 'Return Medio (Close Lun→Close Ven) %',
+                            }
+                            
+                            for i, (key, label) in enumerate(concordance_neg_map.items()):
+                                if key in results:
+                                    with concordance_neg_cols[i % 3]:
+                                        value = results[key]
+                                        if 'Count' in key:
+                                            display_val = f"{int(value)}" if not pd.isna(value) else "N/A"
+                                            color = "normal"
+                                        else:
+                                            display_val = f"{value:.2f}" if not pd.isna(value) else "N/A"
+                                            color = "inverse" if not pd.isna(value) and value < 0 else "normal"
+                                        st.metric(label, display_val, delta_color=color)
+                        
+                        # 1.2 Comportamento del Venerdì nei Casi di Concordanza
+                        st.markdown("**🔍 Che succede al Venerdì quando i pattern si confermano?**")
+                        
+                        # Casi Lunedì+ → Settimana+: comportamento Venerdì
+                        if 'Weekday_Prob_Friday_Positive_In_Monday_Pos_Week_Pos' in results:
+                            friday_pos_in_pos_pos = results.get('Weekday_Prob_Friday_Positive_In_Monday_Pos_Week_Pos', 0)
+                            friday_neg_in_pos_pos = results.get('Weekday_Prob_Friday_Negative_In_Monday_Pos_Week_Pos', 0)
+                            count_friday_pos_pos = results.get('Weekday_Count_Friday_Analyzed_In_Monday_Pos_Week_Pos', 0)
+                            
+                            if not pd.isna(friday_pos_in_pos_pos):
+                                st.markdown(f"**Nei {count_friday_pos_pos} casi Lunedì+ → Settimana+:**")
+                                friday_concordance_pos_cols = st.columns(2)
+                                with friday_concordance_pos_cols[0]:
+                                    st.metric("Venerdì Positivo", f"{friday_pos_in_pos_pos:.1f}%", 
+                                             delta_color="normal" if friday_pos_in_pos_pos > 50 else "inverse")
+                                with friday_concordance_pos_cols[1]:
+                                    st.metric("Venerdì Negativo", f"{friday_neg_in_pos_pos:.1f}%",
+                                             delta_color="inverse" if friday_neg_in_pos_pos > 50 else "normal")
+                        
+                        # Casi Lunedì- → Settimana-: comportamento Venerdì
+                        if 'Weekday_Prob_Friday_Positive_In_Monday_Neg_Week_Neg' in results:
+                            friday_pos_in_neg_neg = results.get('Weekday_Prob_Friday_Positive_In_Monday_Neg_Week_Neg', 0)
+                            friday_neg_in_neg_neg = results.get('Weekday_Prob_Friday_Negative_In_Monday_Neg_Week_Neg', 0)
+                            count_friday_neg_neg = results.get('Weekday_Count_Friday_Analyzed_In_Monday_Neg_Week_Neg', 0)
+                            
+                            if not pd.isna(friday_pos_in_neg_neg):
+                                st.markdown(f"**Nei {count_friday_neg_neg} casi Lunedì- → Settimana-:**")
+                                friday_concordance_neg_cols = st.columns(2)
+                                with friday_concordance_neg_cols[0]:
+                                    st.metric("Venerdì Positivo", f"{friday_pos_in_neg_neg:.1f}%",
+                                             delta_color="normal" if friday_pos_in_neg_neg > 50 else "inverse")
+                                with friday_concordance_neg_cols[1]:
+                                    st.metric("Venerdì Negativo", f"{friday_neg_in_neg_neg:.1f}%",
+                                             delta_color="normal" if friday_neg_in_neg_neg > 50 else "inverse")
+                        
                         # 2. Statistiche Base
                         st.markdown("**📈 Statistiche Generali**")
                         stats_cols = st.columns(4)
@@ -1528,46 +1768,16 @@ def create_streamlit_app():
                                 with stats_cols[i % 4]:
                                     value = results[key]
                                     if 'Correlation' in label:
-                                        display_val = f"{value:.3f}" if not pd.isna(value) else "N/A"
+                                        # Forza la visualizzazione di almeno 3 decimali per le correlazioni
+                                        if pd.isna(value):
+                                            display_val = "N/A"
+                                        else:
+                                            display_val = f"{value:.4f}"  # Cambiato da .3f a .4f
                                     elif 'Rate' in label:
                                         display_val = f"{value:.1f}" if not pd.isna(value) else "N/A"
                                     else:
                                         display_val = f"{int(value)}" if not pd.isna(value) else "N/A"
                                     st.metric(label, display_val)
-                        
-                        # 3. Analisi Lunedì → Altri Giorni
-                        st.markdown("**🔄 Lunedì → Altri Giorni della Settimana**")
-                        
-                        days = ['Tuesday', 'Wednesday', 'Thursday', 'Friday']
-                        day_names_it = ['Martedì', 'Mercoledì', 'Giovedì', 'Venerdì']
-                        
-                        for i, (day, day_it) in enumerate(zip(days, day_names_it)):
-                            st.markdown(f"**{day_it}:**")
-                            day_cols = st.columns(4)
-                            
-                            day_prob_map = {
-                                f'Weekday_Prob_{day}_Positive_Given_Monday_Positive': f'{day_it}+ se Lun+ (%)',
-                                f'Weekday_Prob_{day}_Negative_Given_Monday_Positive': f'{day_it}- se Lun+ (%)',
-                                f'Weekday_Prob_{day}_Positive_Given_Monday_Negative': f'{day_it}+ se Lun- (%)',
-                                f'Weekday_Prob_{day}_Negative_Given_Monday_Negative': f'{day_it}- se Lun- (%)',
-                            }
-                            
-                            for j, (key, label) in enumerate(day_prob_map.items()):
-                                if key in results:
-                                    with day_cols[j % 4]:
-                                        value = results[key]
-                                        delta_color = "normal"
-                                        if not pd.isna(value):
-                                            if value > 55:
-                                                delta_color = "normal"
-                                            elif value < 45:
-                                                delta_color = "inverse"
-                                        st.metric(label, f"{value:.1f}" if not pd.isna(value) else "N/A", delta_color=delta_color)
-                            
-                            # Coppie analizzate
-                            pairs_key = f'Weekday_{day}_Monday_Pairs_Analyzed'
-                            if pairs_key in results:
-                                st.caption(f"Coppie Lunedì-{day_it} analizzate: {int(results[pairs_key])}")
                         
                         # 4. Analisi Venerdì Precedente → Lunedì
                         st.markdown("**🔄 Venerdì Precedente → Lunedì Successivo**")
@@ -1605,6 +1815,72 @@ def create_streamlit_app():
                                     value = results[key]
                                     st.metric(label, f"{int(value)}" if not pd.isna(value) else "N/A")
                         
+                        # 4. Analisi Settimana Precedente → Lunedì Successivo
+                        prev_week_keys = [k for k in results.keys() if 'Previous_Week' in k]
+                        if prev_week_keys:
+                            st.markdown("**🔄 Settimana Precedente → Lunedì Successivo**")
+                            prev_week_monday_cols = st.columns(4)
+                            prev_week_monday_map = {
+                                'Weekday_Prob_Monday_Positive_Given_Previous_Week_Positive': 'Lun+ se Sett prec+ (%)',
+                                'Weekday_Prob_Monday_Negative_Given_Previous_Week_Positive': 'Lun- se Sett prec+ (%)',
+                                'Weekday_Prob_Monday_Positive_Given_Previous_Week_Negative': 'Lun+ se Sett prec- (%)',
+                                'Weekday_Prob_Monday_Negative_Given_Previous_Week_Negative': 'Lun- se Sett prec- (%)',
+                            }
+                            
+                            for i, (key, label) in enumerate(prev_week_monday_map.items()):
+                                if key in results:
+                                    with prev_week_monday_cols[i % 4]:
+                                        value = results[key]
+                                        delta_color = "normal"
+                                        if not pd.isna(value):
+                                            if value > 55:
+                                                delta_color = "normal"
+                                            elif value < 45:
+                                                delta_color = "inverse"
+                                        st.metric(label, f"{value:.1f}" if not pd.isna(value) else "N/A", delta_color=delta_color)
+                            
+                            # Statistiche Settimana Precedente-Lunedì
+                            prev_week_stats_cols = st.columns(4)
+                            prev_week_stats_map = {
+                                'Weekday_Previous_Week_Monday_Consecutive_Pairs_Analyzed': 'Coppie Sett-Lun Analizzate',
+                                'Weekday_Previous_Week_Positive_Count': 'Settimane Precedenti Positive',
+                                'Weekday_Previous_Week_Negative_Count': 'Settimane Precedenti Negative',
+                                'Weekday_Previous_Week_Monday_Return_Correlation': 'Correlazione Sett-Lun',
+                            }
+                            
+                            for i, (key, label) in enumerate(prev_week_stats_map.items()):
+                                if key in results:
+                                    with prev_week_stats_cols[i % 4]:
+                                        value = results[key]
+                                        if 'Correlation' in label:
+                                            # Forza la visualizzazione di almeno 4 decimali per le correlazioni
+                                            if pd.isna(value):
+                                                display_val = "N/A"
+                                            else:
+                                                display_val = f"{value:.4f}"  # Cambiato da .3f a .4f
+                                        else:
+                                            display_val = f"{int(value)}" if not pd.isna(value) else "N/A"
+                                        st.metric(label, display_val)
+                            
+                            # Return medi dopo settimane positive/negative
+                            avg_return_cols = st.columns(2)
+                            avg_return_map = {
+                                'Weekday_Avg_Monday_Return_After_Positive_Week': 'Return Medio Lun dopo Sett+ (%)',
+                                'Weekday_Avg_Monday_Return_After_Negative_Week': 'Return Medio Lun dopo Sett- (%)',
+                            }
+                            
+                            for i, (key, label) in enumerate(avg_return_map.items()):
+                                if key in results:
+                                    with avg_return_cols[i % 2]:
+                                        value = results[key]
+                                        color = "normal"
+                                        if not pd.isna(value):
+                                            if value > 0.5:
+                                                color = "normal"
+                                            elif value < -0.5:
+                                                color = "inverse"
+                                        st.metric(label, f"{value:.2f}" if not pd.isna(value) else "N/A", delta_color=color)
+                        
                         # 5. Insights Summary
                         st.markdown("**💡 Key Insights**")
                         
@@ -1635,11 +1911,56 @@ def create_streamlit_app():
                             elif correlation < 0.1:
                                 insights.append(f"🎲 **Bassa predittività**: Correlazione Lunedì-Settimana molto bassa ({correlation:.3f})")
                         
+                        # Insight 4: Settimana precedente → Lunedì
+                        mon_pos_week_pos = results.get('Weekday_Prob_Monday_Positive_Given_Previous_Week_Positive', 0)
+                        mon_pos_week_neg = results.get('Weekday_Prob_Monday_Positive_Given_Previous_Week_Negative', 0)
+                        if not pd.isna(mon_pos_week_pos) and not pd.isna(mon_pos_week_neg):
+                            if abs(mon_pos_week_pos - mon_pos_week_neg) > 10:
+                                if mon_pos_week_pos > mon_pos_week_neg:
+                                    insights.append(f"📊 **Momentum settimanale**: Dopo settimana positiva, Lunedì è positivo nel {mon_pos_week_pos:.1f}% vs {mon_pos_week_neg:.1f}% dopo settimana negativa")
+                                else:
+                                    insights.append(f"🔄 **Contrarian settimanale**: Dopo settimana negativa, Lunedì è positivo nel {mon_pos_week_neg:.1f}% vs {mon_pos_week_pos:.1f}% dopo settimana positiva")
+                        
+                        # Insight 5: Correlazione settimana precedente
+                        prev_week_correlation = results.get('Weekday_Previous_Week_Monday_Return_Correlation', 0)
+                        if not pd.isna(prev_week_correlation):
+                            if prev_week_correlation > 0.2:
+                                insights.append(f"🔗 **Momentum inter-settimanale**: Correlazione settimana precedente-Lunedì di {prev_week_correlation:.3f}")
+                            elif prev_week_correlation < -0.2:
+                                insights.append(f"🔄 **Mean reversion inter-settimanale**: Correlazione negativa settimana precedente-Lunedì di {prev_week_correlation:.3f}")
+                        
+                        # Insight 6: Comportamento Venerdì nei casi di concordance
+                        friday_pos_in_pos_pos = results.get('Weekday_Prob_Friday_Positive_In_Monday_Pos_Week_Pos', 0)
+                        friday_neg_in_neg_neg = results.get('Weekday_Prob_Friday_Negative_In_Monday_Neg_Week_Neg', 0)
+                        if not pd.isna(friday_pos_in_pos_pos) and not pd.isna(friday_neg_in_neg_neg):
+                            if friday_pos_in_pos_pos > 60:
+                                insights.append(f"🟢 **Venerdì Momentum**: Quando Lunedì+ → Settimana+, Venerdì è positivo nel {friday_pos_in_pos_pos:.1f}% dei casi")
+                            if friday_neg_in_neg_neg > 60:
+                                insights.append(f"🔴 **Venerdì Consistente**: Quando Lunedì- → Settimana-, Venerdì è negativo nel {friday_neg_in_neg_neg:.1f}% dei casi")
+                        
                         for insight in insights:
                             st.markdown(insight)
                         
                         if not insights:
                             st.info("💭 Analizza i dati per identificare pattern interessanti nei comportamenti settimanali")
+                        
+                        # Debug section per le correlazioni (temporaneo)
+                        if st.checkbox("🔧 Debug Correlazioni", value=False):
+                            st.markdown("**Debug Info:**")
+                            debug_cols = st.columns(2)
+                            with debug_cols[0]:
+                                monday_weekly_corr = results.get('Weekday_Monday_Weekly_Return_Correlation', None)
+                                st.write(f"Monday-Weekly Raw: {monday_weekly_corr}")
+                                st.write(f"Type: {type(monday_weekly_corr)}")
+                                if monday_weekly_corr is not None:
+                                    st.write(f"Is NaN: {pd.isna(monday_weekly_corr)}")
+                            
+                            with debug_cols[1]:
+                                prev_week_corr = results.get('Weekday_Previous_Week_Monday_Return_Correlation', None)
+                                st.write(f"PrevWeek-Monday Raw: {prev_week_corr}")
+                                st.write(f"Type: {type(prev_week_corr)}")
+                                if prev_week_corr is not None:
+                                    st.write(f"Is NaN: {pd.isna(prev_week_corr)}")
                 
                 # Export functionality
                 st.subheader("💾 Export Data")
